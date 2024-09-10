@@ -1,0 +1,78 @@
+name: Deploy to cloudflare
+
+on: push
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: |
+          mkdir -p /tmp/usr/local/opt/direnv/bin
+          export bin_path=/tmp/usr/local/opt/direnv/bin
+          curl -sfL https://direnv.net/install.sh | bash
+          chmod +x /tmp/usr/local/opt/direnv/bin/direnv
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: current
+
+      - name: Prepare java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+
+      - name: Install clojure tools
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: "latest"
+          bb: "latest"
+      - name: Cache clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          # List all files containing dependencies:
+          key: cljdeps-${{ hashFiles('deps.edn') }}
+          # key: cljdeps-${{ hashFiles('deps.edn', 'bb.edn') }}
+          restore-keys: cljdeps-
+
+      - name: Install
+        run: |
+          npm i
+          rm resources/public/index.html
+          mv resources/public/index.prod.html resources/public/index.html
+
+      - name: Build
+        run: |
+          rm .env
+          mv .env.prod .env
+          eval "$(/tmp/usr/local/opt/direnv/bin/direnv hook bash)"
+          /tmp/usr/local/opt/direnv/bin/direnv allow
+          /tmp/usr/local/opt/direnv/bin/direnv reload
+          /tmp/usr/local/opt/direnv/bin/direnv exec . npx shadow-cljs release app
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: tooling-frontend-re-frame
+          directory: resources/public
+          # Optional: Enable this if you want to have GitHub Deployments triggered
+          # gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: Switch what branch you are publishing to.
+          # By default this will be the branch which triggered this workflow
+          # branch: main
+          # Optional: Change the working directory
+          # workingDirectory: my-site
+          # Optional: Change the Wrangler version, allows you to point to a specific version or a tag such as `beta`
+          wranglerVersion: "3"
